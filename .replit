@@ -1,0 +1,2 @@
+language = "bash"
+run = "cargo run"
