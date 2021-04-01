@@ -1,2 +1,0 @@
-cargo:rustc-env=TYPENUM_BUILD_CONSTS=/home/runner/dicksword/target/debug/build/typenum-6afa295f52688fab/out/consts.rs
-cargo:rustc-env=TYPENUM_BUILD_OP=/home/runner/dicksword/target/debug/build/typenum-6afa295f52688fab/out/op.rs
