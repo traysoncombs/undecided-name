@@ -1,9 +1,9 @@
-//use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::fs::File;
 use crate::utils::types::BoxResult;
 use serde_json::{from_str, to_string};
-use sqlx::Connection;
+use sqlx::sqlite::SqlitePool;
+use sqlx::Row;
 
 #[derive(Debug)]
 struct StoredUser {
@@ -13,19 +13,19 @@ struct StoredUser {
 }
 
 struct Database {
-  conn: sqlx::Connection,
+  conn: SqlitePool
 }
   impl Database {
-    async pub fn new(path: &str) -> BoxResult<Database> {
+    pub async fn new(path: &str) -> BoxResult<Database> {
       if !Path::new(path.clone()).exists() {
         File::create(path.clone())?;
       }
       Ok(Database {
-        conn: SqliteConnection::open("sqlite://"+path).await?
+        conn: SqlitePool::connect(format!("sqlite://{}", path).as_str()).await?
       })
     }
 
-    async pub fn init(self) -> BoxResult<()> {
+    pub async fn init(&self) -> BoxResult<()> {
       sqlx::query(
         "CREATE TABLE IF NOT EXISTS Users (
             Username CHAR,
@@ -36,8 +36,8 @@ struct Database {
       Ok(())
     }
 
-    async pub fn add_user(self, username: &str, password_hash: &str) -> BoxResult<()> { // doesn't check if user already exists
-      sqlx::query("INSERT INTO Users (Username, PasswordHash, Vault) VALUES ($1, $2, $3)", params![username, password_hash, to_string(&Vec::<String>::new())?])
+    pub async fn add_user(&self, username: &str, password_hash: &str) -> BoxResult<()> { // doesn't check if user already exists
+      sqlx::query("INSERT INTO Users (Username, PasswordHash, Vault) VALUES ($1, $2, $3)")
           .bind(username)
           .bind(password_hash)
           .bind(to_string(&Vec::<String>::new())?)
@@ -46,22 +46,34 @@ struct Database {
       Ok(())
     }
 
-    async pub fn get_user(self, username: &str, password_hash: &str) -> BoxResult<Option<StoredUser>> { // nasty
+    pub async fn user_exists(&self, username: &str) -> BoxResult<bool> {
+      let row = sqlx::query("SELECT Username FROM Users WHERE Username = ?")
+          .bind(username)
+          .fetch_optional(&self.conn)
+          .await?;
+      match row {
+        Some(_) => Ok(true),
+        None => Ok(false)
+      }
+    }
+
+    pub async fn get_user(&self, username: &str, password_hash: &str) -> BoxResult<Option<StoredUser>> { // nasty
       let row = sqlx::query("SELECT * FROM Users WHERE Username = ? AND PasswordHash = ?")
           .bind(username)
           .bind(password_hash)
-          .fetch_optional(&self.conn);
+          .fetch_optional(&self.conn)
+          .await?;
       match row {
         Some(row) => {
-          let vault : String = row.get(2)?;
+          let vault : String = row.try_get(2)?;
           Ok(
             Some(
               StoredUser {
-                username: row.get(0)?,
-                password_hash: row.get(1)?,
+                username: row.try_get(0)?,
+                password_hash: row.try_get(1)?,
                 vault: match from_str(vault.as_ref()) {
-                  Some(v) => v,
-                  Err(e) => panic!("Yikes, error parsing a users vault, you should prbably add better error handling for this: {}", e);
+                  Ok(v) => v,
+                  Err(e) => panic!("Yikes, error parsing a users vault, you should prbably add better error handling for this: {}", e)
                 }
               }  
             )
@@ -69,36 +81,21 @@ struct Database {
         },
         None => Ok(None)
       }
-      /*Ok(
-        self.conn.query_row("SELECT * FROM Users WHERE Username=?1 AND PasswordHash=?2",
-          params![username, password_hash],
-          |row| {
-            let vault : String = row.get(2)?;  // need this as
-            Ok(StoredUser {
-              username: row.get(0)?,
-              password_hash: row.get(1)?,
-              vault: match from_str(vault.as_ref()) {
-                Ok(v) => v,
-                Err(e) => panic!("Yikes, error parsing a users vault, you should prbably add better error handling for this: {}", e)  // error parsing vault, i.e. not good
-              }
-            })
-        }).optional()?
-      )*/
     }
   }
 
 #[cfg(test)]
 mod database_tests {
   use super::*;
-  #[tokio::test]
-  fn full_test() {
+  #[tokio::test(flavor = "multi_thread")]
+  async fn full_test() {
     let db_path = "test_db.db";
-    let mut db = Database::new(&db_path).await.unwrap();
-    let _init_succ = db.init().await.unwrap();
-    let _user_added = db.add_user("penis", "penis").await;
-    let user_added2 = db.add_user.await;
-    println!("{:?}",user_added2);
-    let user = db.get_user("penis", "penis").await;
-    println!("User: {:?}", user.unwrap().unwrap());
+    let  db = Database::new(&db_path).await.unwrap();
+    let _init_succ = &db.init().await.unwrap();
+    let _user_added = &db.add_user("penis", "penis").await;
+    let user_exists = &db.user_exists("penis").await;
+    println!("{:?}",user_exists);
+    let user = &db.get_user("penis", "penis").await;
+    println!("User: {:?}", user.as_ref().unwrap().as_ref().unwrap());
   }
 }
