@@ -50,7 +50,7 @@ pub async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, 
             CustomErrors::QueryError(_) => {
                 log::error!("Query error: {:?}", err);
                 code = StatusCode::BAD_REQUEST;
-                message = "Could not Execute request";
+                message = "Could not execute request";
             }
             _ => {
                 log::error!("unhandled application error: {:?}", err);

@@ -44,65 +44,42 @@ pub mod handlers {
       Password should be a hash of the actual password.
     */
     pub async fn register(body: data::User, db: SqlitePool) -> WarpResult<impl Reply> {
-        let id;
-        let message;
-        let status_code;
         let password_hash = crypto::create_hash(&body.password).map_err(|e| custom_reject(e))?;
         let user_added = database::add_user(&db, &*body.username, &*password_hash)
             .await
             .map_err(|e| custom_reject(e));
         match user_added {
             Ok(()) => {
-                id = String::from("RegistrationSuccess");
-                message = String::from("Successfully registered.");
-                status_code = StatusCode::OK;
+                Ok(StatusCode::CREATED)
             }
             Err(e) => {
                 error!("Error registering a user: {:?}", e);
-                id = String::from("RegistrationError");
-                message = String::from("Error registering user.");
-                status_code = StatusCode::BAD_REQUEST;
+                Ok(StatusCode::BAD_REQUEST)
             }
         }
-        Ok(with_status(
-            json(&data::Response { id, message }),
-            status_code,
-        ))
     }
 
     /*
       Returns auth token for user.
       Takes the hash of the password, this should be hashed by the client.
     */
-    pub async fn login(body: data::User, db: SqlitePool) -> WarpResult<impl Reply> {
-        let id;
-        let message;
-        let status_code;
+    pub async fn login(body: data::User, db: SqlitePool) -> WarpResult<Box<dyn Reply>> {
         let user = database::get_user_by_name(&db, &body.username)
             .await
             .map_err(|e| custom_reject(e))?;
         match user {
             Some(u) => {
                 if crypto::check_hash(&body.password, &u.password_hash) {
-                    id = String::from("LoginSuccess");
-                    message = create_auth_token(&body).map_err(|e| custom_reject(e))?;
-                    status_code = StatusCode::OK;
+                    Ok(Box::new(with_status(
+                        create_auth_token(&body).map_err(|e| custom_reject(e))?,
+                        StatusCode::OK,
+                    )))
                 } else {
-                    id = String::from("LoginError");
-                    message = String::from("Unable to login");
-                    status_code = StatusCode::OK;
+                    Ok(Box::new(StatusCode::BAD_REQUEST))
                 }
             }
-            None => {
-                id = String::from("NoSuchUser");
-                message = String::from("The user specified does not exist.");
-                status_code = StatusCode::BAD_REQUEST
-            }
+            None => Ok(Box::new(StatusCode::BAD_REQUEST)),
         }
-        Ok(with_status(
-            json(&data::Response { id, message }),
-            status_code,
-        ))
     }
 }
 
@@ -123,9 +100,10 @@ mod filter_tests {
     use super::*;
     use crate::server::database;
     use crate::utils::data;
-    use crate::utils::data::Response;
     use rand::{distributions::Alphanumeric, Rng};
     use warp;
+    use warp::hyper::body::Bytes;
+    use warp::http::StatusCode;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn full_test() {
@@ -138,18 +116,18 @@ mod filter_tests {
             .collect();
         let password = "AHHAHAHAHHA LAMOAOAOAOOA";
         let register_response = register(&username, &password.to_string(), &filter).await;
-        assert_eq!("RegistrationSuccess", register_response.id);
+        assert_eq!(StatusCode::CREATED, register_response.status());
         let login_response = login(&username, &password.to_string(), &filter).await;
-        assert_eq!("LoginSuccess", login_response.id)
+        assert_eq!(StatusCode::OK, login_response.status())
     }
 
     async fn login(
         username: &String,
         password: &String,
         filter: &(impl warp::Filter<Extract = (impl Reply,), Error = Infallible> + Clone + 'static),
-    ) -> Response {
+    ) -> warp::http::Response<Bytes> {
         // sadge
-        let result = warp::test::request()
+        warp::test::request()
             .path("/api/login")
             .method("POST")
             .json(&data::User {
@@ -157,17 +135,15 @@ mod filter_tests {
                 password: password.to_string(),
             })
             .reply(filter)
-            .await;
-        let body_text = String::from_utf8(result.body().to_vec()).unwrap();
-        serde_json::from_str::<Response>(&body_text).unwrap()
+            .await
     }
 
     async fn register(
         username: &String,
         password: &String,
         filter: &(impl warp::Filter<Extract = (impl Reply,), Error = Infallible> + Clone + 'static),
-    ) -> Response {
-        let result = warp::test::request()
+    ) -> warp::http::Response<Bytes> {
+        warp::test::request()
             .path("/api/register")
             .method("POST")
             .json(&data::User {
@@ -175,8 +151,6 @@ mod filter_tests {
                 password: password.to_string(),
             })
             .reply(filter)
-            .await;
-        let body_text = String::from_utf8(result.body().to_vec()).unwrap();
-        serde_json::from_str::<Response>(&body_text).unwrap()
+            .await
     }
 }
