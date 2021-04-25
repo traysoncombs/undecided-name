@@ -8,9 +8,9 @@ use std::path::Path;
 
 #[derive(Debug)]
 pub struct StoredUser {
-    username: String,
-    password_hash: String,
-    vault: Vec<String>,
+    pub username: String,
+    pub password_hash: String,
+    pub vault: Vec<String>,
 }
 
 pub async fn new_user_db(path: &str) -> CustomResult<SqlitePool> {
@@ -64,6 +64,26 @@ pub async fn get_user(
     sqlx::query("SELECT * FROM Users WHERE Username = ? AND PasswordHash = ?")
         .bind(username)
         .bind(password_hash)
+        .fetch_optional(pool)
+        .await
+        .map_err(CustomErrors::QueryError)?
+        .map_or(Ok(None), |row| {
+            let vault: String = row.try_get(2).map_err(CustomErrors::RowDecodeError)?;
+            Ok(Some(StoredUser {
+                username: row.try_get(0).map_err(CustomErrors::RowDecodeError)?,
+                password_hash: row.try_get(1).map_err(CustomErrors::RowDecodeError)?,
+                vault: from_str(vault.as_ref()).map_err(CustomErrors::VaultDecodeError)?,
+            }))
+        })
+}
+
+pub async fn get_user_by_name(
+    pool: &SqlitePool,
+    username: &str,
+) -> CustomResult<Option<StoredUser>> {
+    // nasty
+    sqlx::query("SELECT * FROM Users WHERE Username = ?")
+        .bind(username)
         .fetch_optional(pool)
         .await
         .map_err(CustomErrors::QueryError)?

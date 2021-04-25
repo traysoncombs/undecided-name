@@ -1,10 +1,10 @@
+use log;
 use serde::Serialize;
 use sqlx;
 use std::convert::Infallible;
 use thiserror::Error;
 use warp::http::StatusCode;
 use warp::reply::{json, with_status};
-use log;
 
 #[derive(Error, Debug)]
 pub enum CustomErrors {
@@ -22,6 +22,8 @@ pub enum CustomErrors {
     VaultEncodeError(serde_json::Error),
     #[error("Error registering user: {0}")]
     RegisterError(sqlx::Error),
+    #[error("Error encoding jwt token: {0}")]
+    JWTEncodingError(jsonwebtoken::errors::Error),
     #[error("Unexpected error")]
     UnexpectedError,
 }
