@@ -1,2 +1,2 @@
 # undecided-name
-This was the beggining of something at one point.
+I think this was the start of a password manager I was building but never really ended up finishing.
